@@ -24,7 +24,7 @@ func fillCommits(path, email string, commits map[int]int, b Boundary, mu *sync.M
 	}
 
 	err = commitIterator.ForEach(func(c *object.Commit) error {
-		if c.Author.Email != email {
+		if email != "*" && c.Author.Email != email {
 			return nil
 		}
 

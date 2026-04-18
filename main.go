@@ -52,7 +52,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if valid := isValidEmail(email); !valid {
+	if valid := email == "*" || isValidEmail(email); !valid {
 		fmt.Fprintln(os.Stderr, color.Red.Sprintf("gitcs: invalid 'email' address"))
 		os.Exit(1)
 	}
