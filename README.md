@@ -35,6 +35,11 @@ These commits are committed by your global Git email address, but you can also u
 > gitcs -email "email@example.com" -path "/home/user/dev"
 ```
 
+If you want to include commits from **all** authors (regardless of email), pass a wildcard:
+```bash
+> gitcs -email "*" -path "/home/user/dev"
+```
+
 By default, the tool displays commits from the last 6 months, but you can configure this using the `since` and `until` flags.
 ```bash
 > gitcs -since "2023-10-24" -until "2024-01-15" -path "/home/user/dev"
