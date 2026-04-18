@@ -66,10 +66,15 @@ func printTable(commits map[int]int, b Boundary) {
 }
 
 func printCell(val, maxValue int) string {
+	digitWidth := 1
+	if maxValue > 0 {
+		digitWidth = len(fmt.Sprintf("%d", maxValue))
+	}
+
 	var colorFunc color.Style
 	if val == 0 {
 		colorFunc = color.New(color.FgLightWhite, color.BgBlack)
-		return colorFunc.Sprintf("  - ")
+		return colorFunc.Sprintf(" %*s ", digitWidth, "-")
 	}
 
 	if maxValue <= 0 {
@@ -85,7 +90,7 @@ func printCell(val, maxValue int) string {
 	} else {
 		colorFunc = color.New(color.FgBlack, color.BgBlue)
 	}
-	return colorFunc.Sprintf(" %2d ", val)
+	return colorFunc.Sprintf(" %*d ", digitWidth, val)
 }
 
 func printLegend(max int) {
