@@ -105,13 +105,14 @@ func TestRunPartialAndFailedResults(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(broken, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	expectedBroken := resolvedPath(t, broken)
 	code, out, errOut := runForTest("-path", broken, "-email", "*")
-	if code == 0 || strings.Contains(out, "Total commits: 0") || !strings.Contains(errOut, broken) {
+	if code == 0 || strings.Contains(out, "Total commits: 0") || !strings.Contains(errOut, expectedBroken) {
 		t.Fatalf("total failure looked successful: %d\n%s\n%s", code, out, errOut)
 	}
 	createTestRepo(t, filepath.Join(root, "good"), "tester@test.com", 1, testClock)
 	code, out, errOut = runForTest("-path", root, "-email", "*")
-	if code != 0 || !strings.Contains(out, "Partial results") || !strings.Contains(out, "Total commits: 1") || !strings.Contains(errOut, broken) {
+	if code != 0 || !strings.Contains(out, "Partial results") || !strings.Contains(out, "Total commits: 1") || !strings.Contains(errOut, expectedBroken) {
 		t.Fatalf("partial result: %d\n%s\n%s", code, out, errOut)
 	}
 }

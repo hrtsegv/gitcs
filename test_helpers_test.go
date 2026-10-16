@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
@@ -17,6 +18,20 @@ var testClock = time.Date(2026, 10, 16, 18, 0, 0, 0, time.UTC)
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
 
 func plain(s string) string { return ansiPattern.ReplaceAllString(s, "") }
+
+// Temporary directory parents can be symlinks, including /var on macOS.
+func resolvedPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	absolute, err := filepath.Abs(resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return absolute
+}
 
 func mustTime(t *testing.T, s string) time.Time {
 	t.Helper()
