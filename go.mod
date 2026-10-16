@@ -6,6 +6,7 @@ require (
 	github.com/briandowns/spinner v1.23.2
 	github.com/go-git/go-git/v5 v5.16.4
 	github.com/gookit/color v1.6.0
+	golang.org/x/term v0.38.0
 )
 
 require (
@@ -32,6 +33,5 @@ require (
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/term v0.38.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )

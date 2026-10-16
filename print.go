@@ -2,24 +2,32 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/gookit/color"
 )
 
-func buildHeader(start, end time.Time) string {
-	s := strings.Builder{}
-	s.WriteString("     ") // Offset for day names (Mon, Wed, Fri) which are 5 chars total with padding
-	lastMonth := ""
+func cellWidth(max int) int {
+	if max < 1 {
+		max = 1
+	}
+	return len(fmt.Sprint(max)) + 2
+}
+
+func buildHeader(start, end time.Time, width int) string {
+	var s strings.Builder
+	s.WriteString("     ")
+	lastMonth := time.Month(0)
 	for current := start; !current.After(end); current = current.AddDate(0, 0, 7) {
-		month := current.Month().String()[:3]
-		if month != lastMonth {
-			s.WriteString(fmt.Sprintf("%-4s", month))
-			lastMonth = month
-		} else {
-			s.WriteString("    ")
+		label := ""
+		if current.Month() != lastMonth {
+			label = current.Month().String()[:3]
+			lastMonth = current.Month()
 		}
+		fmt.Fprintf(&s, "%-*s", width, label)
 	}
 	return s.String()
 }
@@ -32,93 +40,104 @@ func getDay(i int) string {
 		return "Wed"
 	case 5:
 		return "Fri"
+	default:
+		return "   "
 	}
-	return "   "
 }
 
-func printTable(commits map[int]int, b Boundary) {
+func printTable(out io.Writer, commits map[string]int, b Boundary, width int) {
 	since := b.Since
-	until := b.Until
-
+	until := b.Until.AddDate(0, 0, -1)
 	for since.Weekday() != time.Sunday {
 		since = since.AddDate(0, 0, -1)
 	}
 	for until.Weekday() != time.Saturday {
 		until = until.AddDate(0, 0, 1)
 	}
+	maxValue := getMaxValue(commits)
+	cell := cellWidth(maxValue)
+	availableWeeks := int((until.Unix()-since.Unix())/(7*24*60*60)) + 1
+	weeks := max(1, min((width-5)/cell, availableWeeks))
 
-	fmt.Println(buildHeader(since, until))
-	max := getMaxValue(commits)
-
-	for i := 0; i < 7; i++ {
-		fmt.Printf("%-5s", getDay(i))
-		curr := since.AddDate(0, 0, i)
-		for !curr.After(until) {
-			d := daysAgo(curr)
-			fmt.Print(printCell(commits[d], max))
-			curr = curr.AddDate(0, 0, 7)
+	// Split long ranges into blocks rather than wrapping terminal rows.
+	for start := since; !start.After(until); {
+		end := start.AddDate(0, 0, weeks*7-1)
+		if end.After(until) {
+			end = until
 		}
-		fmt.Println()
+		fmt.Fprintf(out, "\n%s – %s\n", start.Format("Jan 2006"), end.Format("Jan 2006"))
+		fmt.Fprintln(out, buildHeader(start, end, cell))
+		for day := 0; day < 7; day++ {
+			fmt.Fprintf(out, "%-5s", getDay(day))
+			for current := start.AddDate(0, 0, day); !current.After(end); current = current.AddDate(0, 0, 7) {
+				if current.Before(b.Since) || !current.Before(b.Until) {
+					fmt.Fprint(out, strings.Repeat(" ", cell))
+				} else {
+					fmt.Fprint(out, printCell(commits[current.Format(dateLayout)], maxValue))
+				}
+			}
+			fmt.Fprintln(out)
+		}
+		start = end.AddDate(0, 0, 1)
 	}
-
-	printLegend(max)
-	printSummary(commits, b)
+	printLegend(out, maxValue, width)
+	printSummary(out, commits, b)
 }
 
 func printCell(val, maxValue int) string {
-	digitWidth := 1
-	if maxValue > 0 {
-		digitWidth = len(fmt.Sprintf("%d", maxValue))
-	}
-
-	var colorFunc color.Style
+	digits := cellWidth(maxValue) - 2
 	if val == 0 {
-		colorFunc = color.New(color.FgLightWhite, color.BgBlack)
-		return colorFunc.Sprintf(" %*s ", digitWidth, "-")
+		return color.New(color.FgLightWhite, color.BgBlack).Sprintf(" %*s ", digits, "-")
 	}
-
-	if maxValue <= 0 {
-		maxValue = 1
+	var style color.Style
+	switch {
+	case val <= maxValue/4:
+		style = color.New(color.FgBlack, color.BgLightCyan)
+	case val <= maxValue/2:
+		style = color.New(color.FgBlack, color.BgHiCyan)
+	case val <= maxValue/4*3+maxValue%4*3/4:
+		style = color.New(color.FgBlack, color.BgHiBlue)
+	default:
+		style = color.New(color.FgLightWhite, color.BgBlue)
 	}
-
-	if val <= maxValue/4 {
-		colorFunc = color.New(color.FgBlack, color.BgLightCyan)
-	} else if val <= maxValue/2 {
-		colorFunc = color.New(color.FgBlack, color.BgHiCyan)
-	} else if val <= (maxValue*3)/4 {
-		colorFunc = color.New(color.FgBlack, color.BgHiBlue)
-	} else {
-		colorFunc = color.New(color.FgBlack, color.BgBlue)
-	}
-	return colorFunc.Sprintf(" %*d ", digitWidth, val)
+	return style.Sprintf(" %*d ", digits, val)
 }
 
-func printLegend(max int) {
-	fmt.Printf("\nLegend: Less ")
-	fmt.Print(printCell(0, max), " ")
-	if max > 0 {
-		fmt.Print(printCell(1, max), " ")
+func printLegend(out io.Writer, maxValue, width int) {
+	values := []int{0}
+	if maxValue > 0 {
+		values = append(values, 1, maxValue/4, maxValue/2, maxValue-maxValue/4, maxValue)
 	}
-	if max > 1 {
-		fmt.Print(printCell(max/2, max), " ")
+	sort.Ints(values)
+	fmt.Fprint(out, "\nLegend: Less ")
+	columns := 13
+	last := -1
+	for _, value := range values {
+		if value == last {
+			continue
+		}
+		last = value
+		if columns+cellWidth(maxValue)+1 > width {
+			fmt.Fprint(out, "\n     ")
+			columns = 5
+		}
+		fmt.Fprint(out, printCell(value, maxValue), " ")
+		columns += cellWidth(maxValue) + 1
 	}
-	if max > 2 {
-		fmt.Print(printCell(max*3/4, max), " ")
+	if columns+4 > width {
+		fmt.Fprint(out, "\n     ")
 	}
-	if max > 3 {
-		fmt.Print(printCell(max, max), " ")
-	}
-	fmt.Println("More")
+	fmt.Fprintln(out, "More")
 }
 
-func printSummary(commits map[int]int, b Boundary) {
+func printSummary(out io.Writer, commits map[string]int, b Boundary) {
 	total := 0
-	for _, v := range commits {
-		total += v
+	for _, count := range commits {
+		total += count
 	}
-	fmt.Printf("Total commits: %s between %s and %s\n",
+	fmt.Fprintf(out, "Total commits: %s between %s and %s\n",
 		color.Green.Sprintf("%d", total),
-		color.Cyan.Render(b.Since.Format("2006-01-02")),
-		color.Cyan.Render(b.Until.Format("2006-01-02")),
+		color.Cyan.Render(b.Since.Format(dateLayout)),
+		color.Cyan.Render(b.Until.AddDate(0, 0, -1).Format(dateLayout)),
 	)
 }

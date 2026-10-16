@@ -1,283 +1,104 @@
 package main
 
 import (
-	"math"
-	"os"
-	"path"
+	"slices"
 	"testing"
 	"time"
 )
 
-func TestIsValidEmail(t *testing.T) {
-	tests := []struct {
-		name  string
-		email string
-		want  bool
+func TestSetTimeFlags(t *testing.T) {
+	for _, tt := range []struct {
+		name, since, until, wantSince, wantUntil string
+		clamped                                  bool
+		wantErr                                  bool
 	}{
-		{
-			name:  "valid - test 1",
-			email: "tester@test.com",
-			want:  true,
-		},
-		{
-			name:  "not valid - test 2",
-			email: "tester",
-			want:  false,
-		},
-		{
-			name:  "not valid - test 3",
-			email: "jane@.com",
-			want:  false,
-		},
-		{
-			name:  "not valid - test 4",
-			email: "jane.com",
-			want:  false,
-		},
-	}
-	for _, tt := range tests {
+		{"same day", "2026-10-10", "2026-10-10", "2026-10-10", "2026-10-11", false, false},
+		{"default range", "", "", "2026-04-17", "2026-10-17", false, false},
+		{"end only", "", "2026-10-10", "2026-04-11", "2026-10-11", false, false},
+		{"start only", "2026-10-10", "", "2026-10-10", "2026-10-17", false, false},
+		{"future end is capped", "2026-10-10", "2099-01-01", "2026-10-10", "2026-10-17", true, false},
+		{"reversed", "2026-10-12", "2026-10-10", "", "", false, true},
+		{"future start", "2099-01-01", "", "", "", false, true},
+		{"invalid start", "10-10-2026", "", "", "", false, true},
+		{"invalid end", "", "2026-02-30", "", "", false, true},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isValidEmail(tt.email); got != tt.want {
-				t.Errorf("isValidEmail() = %v, want %v", got, tt.want)
+			b, err := setTimeFlags(tt.since, tt.until, testClock)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if b.Since.Format(dateLayout) != tt.wantSince || b.Until.Format(dateLayout) != tt.wantUntil {
+				t.Fatalf("got %s..%s, want %s..%s", b.Since, b.Until, tt.wantSince, tt.wantUntil)
+			}
+			if b.UntilClamped != tt.clamped {
+				t.Fatalf("clamped = %v", b.UntilClamped)
 			}
 		})
 	}
 }
 
-func TestIsValidFolderPath(t *testing.T) {
-	tempDir := t.TempDir()
-	existingFolder := path.Join(tempDir, "existing")
-	if err := os.Mkdir(existingFolder, 0755); err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-
-	existingFile := path.Join(tempDir, "file.txt")
-	if err := os.WriteFile(existingFile, []byte("test"), 0644); err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-
-	tests := []struct {
-		name     string
-		folder   string
-		expected bool
-	}{
-		{
-			name:     "valid folder",
-			folder:   existingFolder,
-			expected: true,
-		},
-		{
-			name:     "non-existent folder",
-			folder:   path.Join(tempDir, "non-existent"),
-			expected: false,
-		},
-		{
-			name:     "file instead of folder",
-			folder:   existingFile,
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			actual := isValidFolderPath(tt.folder)
-			if actual != tt.expected {
-				t.Errorf("isValidFolderPath() = %v, want %v", actual, tt.expected)
+func TestCalendarDateAcrossDST(t *testing.T) {
+	for _, zone := range []string{"Europe/Berlin", "Asia/Beirut"} {
+		t.Run(zone, func(t *testing.T) {
+			location := testLocation(t, zone)
+			now := time.Date(2026, 3, 30, 12, 0, 0, 0, location)
+			b, err := setTimeFlags("2026-03-29", "2026-03-29", now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if b.Since.Format(dateLayout) != "2026-03-29" || b.Until.Format(dateLayout) != "2026-03-30" {
+				t.Fatalf("DST changed calendar dates: %+v", b)
+			}
+			if b.Location != location {
+				t.Fatal("reporting timezone was lost")
+			}
+			if b.Until.Sub(b.Since) != 24*time.Hour {
+				t.Fatal("civil-date arithmetic should be independent of DST")
 			}
 		})
 	}
 }
 
-func TestDaysAgo(t *testing.T) {
-	now := time.Now()
-	tests := []struct {
-		name     string
-		time     time.Time
-		expected int
-	}{
-		{
-			name:     "Today",
-			time:     now,
-			expected: 0,
-		},
-		{
-			name:     "Yesterday",
-			time:     now.Add(-24 * time.Hour),
-			expected: 1,
-		},
-		{
-			name:     "Two Days Ago",
-			time:     now.Add(-48 * time.Hour),
-			expected: 2,
-		},
-		{
-			name:     "Three Days Ago",
-			time:     now.Add(-72 * time.Hour),
-			expected: 3,
-		},
-		{
-			name:     "Future Date",
-			time:     now.Add(24 * time.Hour),
-			expected: -1,
-		},
+func TestDateKeyConvertsTimezone(t *testing.T) {
+	when := mustTime(t, "2026-10-10T23:30:00Z")
+	if got := dateKey(when, testLocation(t, "Asia/Beirut")); got != "2026-10-11" {
+		t.Fatalf("got %s, want local date 2026-10-11", got)
 	}
+}
 
-	for _, tt := range tests {
+func TestParseEmails(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		input, want []string
+		wantErr     bool
+	}{
+		{"mailbox", []string{"Tester <tester@test.com>"}, []string{"tester@test.com"}, false},
+		{"multiple", []string{"a@test.com", "b@test.com", "a@test.com"}, []string{"a@test.com", "b@test.com"}, false},
+		{"wildcard", []string{"*"}, []string{"*"}, false},
+		{"mixed wildcard", []string{"*", "a@test.com"}, nil, true},
+		{"invalid", []string{"invalid"}, nil, true},
+		{"blank", []string{""}, nil, true},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			actual := daysAgo(tt.time)
-			if actual != tt.expected {
-				t.Errorf("Expected %d, got %d", tt.expected, actual)
+			got, err := parseEmails(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestGetMaxValue(t *testing.T) {
-	type args struct {
-		m map[int]int
+	if got := getMaxValue(nil); got != 0 {
+		t.Fatalf("empty maximum = %d", got)
 	}
-	tests := []struct {
-		name string
-		args args
-		want int
-	}{
-		{
-			name: "empty map",
-			args: args{
-				m: map[int]int{},
-			},
-			want: math.MinInt,
-		},
-		{
-			name: "one element map",
-			args: args{
-				m: map[int]int{
-					1: 1,
-				},
-			},
-			want: 1,
-		},
-		{
-			name: "two elements map",
-			args: args{
-				m: map[int]int{
-					1: 1,
-					2: 2,
-				},
-			},
-			want: 2,
-		},
-		{
-			name: "ten elements map",
-			args: args{
-				m: map[int]int{
-					1:  1,
-					2:  2,
-					10: 3245,
-					23: 4653,
-					29: 431509,
-					32: 34,
-					8:  35,
-					12: 12,
-					19: 86,
-					43: 17,
-				},
-			},
-			want: 431509,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := getMaxValue(tt.args.m); got != tt.want {
-				t.Errorf("getMaxValue() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSetTimeFlags(t *testing.T) {
-	originalNow := now
-	defer func() {
-		now = originalNow
-	}()
-
-	now = time.Date(2023, time.January, 1, 0, 0, 0, 0, time.UTC)
-
-	tests := []struct {
-		name          string
-		sinceflag     string
-		untilflag     string
-		expectedSince time.Time
-		expectedUntil time.Time
-		expectedError string
-	}{
-		{
-			name:          "Valid since and until flags provided",
-			sinceflag:     "2022-01-01",
-			untilflag:     "2022-12-31",
-			expectedSince: time.Date(2022, time.January, 1, 0, 0, 0, 0, time.UTC),
-			expectedUntil: time.Date(2022, time.December, 31, 0, 0, 0, 0, time.UTC),
-			expectedError: "",
-		},
-		{
-			name:          "Valid since flag provided, until flag not provided",
-			sinceflag:     "2022-01-01",
-			untilflag:     "",
-			expectedSince: time.Date(2022, time.January, 1, 0, 0, 0, 0, time.UTC),
-			expectedUntil: time.Date(2023, time.January, 1, 0, 0, 0, 0, time.UTC),
-			expectedError: "",
-		},
-		{
-			name:          "Valid until flag provided, since flag not provided",
-			sinceflag:     "",
-			untilflag:     "2022-12-31",
-			expectedSince: time.Date(2022, time.July, 2, 0, 0, 0, 0, time.UTC),
-			expectedUntil: time.Date(2022, time.December, 31, 0, 0, 0, 0, time.UTC),
-			expectedError: "",
-		},
-		{
-			name:          "Invalid since flag format",
-			sinceflag:     "01-01-2022",
-			untilflag:     "",
-			expectedSince: time.Time{},
-			expectedUntil: time.Date(2023, time.January, 1, 0, 0, 0, 0, time.UTC),
-			expectedError: "invalid 'since' date format. please use the format: 2006-01-02",
-		},
-		{
-			name:          "Invalid until flag format",
-			sinceflag:     "",
-			untilflag:     "2022/12/31",
-			expectedSince: time.Date(2022, time.July, 4, 0, 0, 0, 0, time.UTC),
-			expectedUntil: time.Time{},
-			expectedError: "invalid 'until' date format. please use the format: 2006-01-02",
-		},
-		{
-			name:          "until flag is in the future",
-			untilflag:     "2099-01-01",
-			sinceflag:     "2022-01-01",
-			expectedSince: time.Date(2022, time.January, 1, 0, 0, 0, 0, time.UTC),
-			expectedUntil: now,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b, err := setTimeFlags(tt.sinceflag, tt.untilflag)
-
-			if err != nil {
-				if err.Error() != tt.expectedError {
-					t.Errorf("Unexpected error message. Expected: %v, Got: %v", tt.expectedError, err.Error())
-				}
-				return
-			}
-
-			if b.Since != tt.expectedSince {
-				t.Errorf("Unexpected value of 'since'. Expected: %v, Got: %v", tt.expectedSince, b.Since)
-			}
-
-			if b.Until != tt.expectedUntil {
-				t.Errorf("Unexpected value of 'until'. Expected: %v, Got: %v", tt.expectedUntil, b.Until)
-			}
-		})
+	if got := getMaxValue(map[string]int{"2026-10-10": 3, "2026-10-11": 100}); got != 100 {
+		t.Fatalf("maximum = %d", got)
 	}
 }

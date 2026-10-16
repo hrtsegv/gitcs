@@ -16,16 +16,18 @@ Thank you for considering contributing to Git Commits Visualizer! We welcome con
 
 ## Testing
 
-We use a script called `setup-test.sh` to generate test data for running unit tests. Please follow these steps to run the tests:
+Tests create isolated repositories in temporary directories and use a fixed clock.
+No fixture setup or global Git configuration is required. Use the Go version
+specified in `go.mod`, and have Git installed for the worktree and configuration
+integration tests.
 
-1. **Run the setup script**: Execute the `setup-test.sh` script to generate the `/test_data` folder:
-    ```sh
-    ./setup-test.sh
-    ```
-2. **Run the tests**: After generating the test data, run the tests using:
-    ```sh
-    go test ./...
-    ```
+```sh
+go test -race ./...
+go vet ./...
+```
+
+`setup-test.sh` remains available to create repositories for manual experiments;
+the automated tests do not use those repositories.
 
 Ensure that all tests pass before submitting your changes.
 

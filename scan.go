@@ -1,34 +1,58 @@
 package main
 
 import (
+	"context"
 	"io/fs"
 	"path/filepath"
 	"strings"
 )
 
-func scanGitFolders(root string) ([]string, error) {
-	var gitFolders []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+type ScanResult struct {
+	Repos       []string
+	Diagnostics []Diagnostic
+}
+
+func scanGitFolders(ctx context.Context, root string) (ScanResult, error) {
+	result := ScanResult{}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return result, err
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return result, err
+	}
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if cancelErr := ctx.Err(); cancelErr != nil {
+			return cancelErr
+		}
 		if err != nil {
-			return err
+			if path == root {
+				return err
+			}
+			result.Diagnostics = append(result.Diagnostics, Diagnostic{path, err})
+			return nil
 		}
 
-		if d.IsDir() && d.Name() == ".git" {
-			gitFolder := filepath.Dir(path)
-			gitFolders = append(gitFolders, gitFolder)
-			return filepath.SkipDir // Skip further traversal within this directory
+		if d.Name() == ".git" {
+			// Worktrees and submodules use a .git file pointing to their storage.
+			result.Repos = append(result.Repos, filepath.Dir(path))
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		// Skip dependency directories
 		_, ok := excludedFolders[strings.ToLower(d.Name())]
-		if d.IsDir() && ok {
+		if path != root && d.IsDir() && ok {
 			return filepath.SkipDir
 		}
 
 		return nil
 	})
 
-	return gitFolders, err
+	return result, err
 }
 
 // excludedFolders is a map of folder names (case-insensitive) to be excluded during the scan.

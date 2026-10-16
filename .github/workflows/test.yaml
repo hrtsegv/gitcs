@@ -6,37 +6,38 @@ on:
       - main
     paths:
       - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/test.yaml'
   push:
     branches:
       - main
     paths:
       - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/test.yaml'
   workflow_dispatch:
 
 jobs:
   test:
     name: Test
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v7
         with:
-          go-version: 1.22
-
-      - name: Configure Git
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "anymail@example.com"
-
-      - name: chmod
-        run: chmod +x ./setup-test.sh
-
-      - name: setup tests
-        run: ./setup-test.sh
+          go-version-file: go.mod
 
       - name: Run tests
-        run: go test ./...
+        run: go test -race ./...
+
+      - name: Vet
+        run: go vet ./...
