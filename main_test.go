@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,20 +101,30 @@ func TestRunErrorsAndHelp(t *testing.T) {
 }
 
 func TestRunPartialAndFailedResults(t *testing.T) {
-	root := t.TempDir()
-	broken := filepath.Join(root, "broken")
-	if err := os.MkdirAll(filepath.Join(broken, ".git"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	expectedBroken := resolvedPath(t, broken)
-	code, out, errOut := runForTest("-path", broken, "-email", "*")
-	if code == 0 || strings.Contains(out, "Total commits: 0") || !strings.Contains(errOut, expectedBroken) {
-		t.Fatalf("total failure looked successful: %d\n%s\n%s", code, out, errOut)
-	}
-	createTestRepo(t, filepath.Join(root, "good"), "tester@test.com", 1, testClock)
-	code, out, errOut = runForTest("-path", root, "-email", "*")
-	if code != 0 || !strings.Contains(out, "Partial results") || !strings.Contains(out, "Total commits: 1") || !strings.Contains(errOut, expectedBroken) {
-		t.Fatalf("partial result: %d\n%s\n%s", code, out, errOut)
+	for _, directory := range []string{"broken", "broken with spaces", `broken\repo`} {
+		t.Run(directory, func(t *testing.T) {
+			root := t.TempDir()
+			broken := filepath.Join(root, directory)
+			if err := os.MkdirAll(filepath.Join(broken, ".git"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			expectedWarning := fmt.Sprintf("gitcs: skipped %q:", resolvedPath(t, broken))
+			code, out, errOut := runForTest("-path", broken, "-email", "*")
+			if code == 0 || strings.Contains(out, "Total commits: 0") {
+				t.Fatalf("total failure looked successful: %d\n%s\n%s", code, out, errOut)
+			}
+			if !strings.Contains(errOut, expectedWarning) {
+				t.Fatalf("missing repository warning %q in stderr:\n%s", expectedWarning, errOut)
+			}
+			createTestRepo(t, filepath.Join(root, "good"), "tester@test.com", 1, testClock)
+			code, out, errOut = runForTest("-path", root, "-email", "*")
+			if code != 0 || !strings.Contains(out, "Partial results") || !strings.Contains(out, "Total commits: 1") {
+				t.Fatalf("partial result: %d\n%s\n%s", code, out, errOut)
+			}
+			if !strings.Contains(errOut, expectedWarning) {
+				t.Fatalf("missing repository warning %q in stderr:\n%s", expectedWarning, errOut)
+			}
+		})
 	}
 }
 
