@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"sort"
 	"sync"
@@ -87,9 +88,12 @@ func readRepo(ctx context.Context, path string, q Query) ([]CommitRecord, error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
+	repo, err := openRepository(path)
 	if err != nil {
 		return nil, err
+	}
+	if closer, ok := repo.Storer.(io.Closer); ok {
+		defer closer.Close()
 	}
 	roots, err := historyRoots(repo, q.BranchScope)
 	if err != nil {

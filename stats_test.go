@@ -190,6 +190,23 @@ func TestLinkedWorktree(t *testing.T) {
 	if len(report.Commits) != 2 || len(report.Commits[0].Repositories) != 2 {
 		t.Fatalf("worktree duplicate: %+v", report)
 	}
+	// Linux lets an open file be renamed, so inspect its descriptors as well.
+	// Windows rejects this rename if the scanner retained the commondir handle.
+	metadata := filepath.Join(source, ".git", "worktrees", "linked", "commondir")
+	if descriptors, err := os.ReadDir("/proc/self/fd"); err == nil {
+		resolved := resolvedPath(t, metadata)
+		for _, descriptor := range descriptors {
+			if target, err := os.Readlink(filepath.Join("/proc/self/fd", descriptor.Name())); err == nil && target == resolved {
+				t.Fatal("worktree scan retained an open commondir file")
+			}
+		}
+	}
+	if err := os.Rename(metadata, metadata+".closed"); err != nil {
+		t.Fatalf("worktree metadata still in use after scan: %v", err)
+	}
+	if err := os.Rename(metadata+".closed", metadata); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestInitializedSubmodule(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -25,9 +26,22 @@ func TestExplorerPTYHelper(t *testing.T) {
 	if os.Getenv("GITCS_TEST_PTY") != "1" {
 		return
 	}
-	os.Exit(runWithInput(context.Background(), []string{
+	before, err := term.GetState(int(os.Stdin.Fd()))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "terminal baseline:", err)
+		os.Exit(99)
+	}
+	code := runWithInput(context.Background(), []string{
 		"explore", "-path", os.Getenv("GITCS_TEST_ROOT"), "-email", "*", "-timezone", "UTC",
-	}, os.Stdin, os.Stdout, os.Stderr, testClock))
+	}, os.Stdin, os.Stdout, os.Stderr, testClock)
+	// Check before the session leader exits: Darwin invalidates terminal ioctls
+	// on the parent's slave descriptor after that session has ended.
+	after, err := term.GetState(int(os.Stdin.Fd()))
+	if err != nil || !reflect.DeepEqual(before, after) {
+		fmt.Fprintln(os.Stderr, "UI did not restore terminal attributes:", err)
+		os.Exit(99)
+	}
+	os.Exit(code)
 }
 
 func TestExplorerTerminalLifecycle(t *testing.T) {
@@ -47,10 +61,6 @@ func TestExplorerTerminalLifecycle(t *testing.T) {
 			defer master.Close()
 			defer slave.Close()
 			if err := pty.Setsize(master, &pty.Winsize{Cols: 80, Rows: 24}); err != nil {
-				t.Fatal(err)
-			}
-			before, err := term.GetState(int(slave.Fd()))
-			if err != nil {
 				t.Fatal(err)
 			}
 			command := exec.Command(os.Args[0], "-test.run=^TestExplorerPTYHelper$", "-test.timeout=30s")
@@ -152,13 +162,6 @@ func TestExplorerTerminalLifecycle(t *testing.T) {
 				t.Fatal("terminal UI did not quit")
 			}
 			waitFor("\x1b[?1049l")
-			after, err := term.GetState(int(slave.Fd()))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(before, after) {
-				t.Fatal("UI did not restore terminal attributes")
-			}
 		})
 	}
 }
