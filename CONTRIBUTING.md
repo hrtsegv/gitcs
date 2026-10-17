@@ -21,6 +21,11 @@ No fixture setup or global Git configuration is required. Use the Go version
 specified in `go.mod`, and have Git installed for the worktree and configuration
 integration tests.
 
+Explorer model tests cover navigation, filters, resizing, incremental results,
+and cancellation on every CI platform. On Linux and macOS, pseudo-terminal tests
+also run the real UI and check normal quit, Ctrl+C, alternate-screen cleanup,
+and restoration of terminal settings.
+
 ```sh
 go test -race ./...
 go vet ./...

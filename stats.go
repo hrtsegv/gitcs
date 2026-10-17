@@ -27,7 +27,7 @@ type Query struct {
 	Now         time.Time
 }
 
-// CommitRecord retains the information needed for a future commit explorer.
+// CommitRecord is shared by the report and interactive explorer.
 type CommitRecord struct {
 	Hash          plumbing.Hash
 	AuthorName    string
@@ -142,27 +142,29 @@ func readRepo(ctx context.Context, path string, q Query) ([]CommitRecord, error)
 	return commits, nil
 }
 
-func processRepos(ctx context.Context, repos []string, q Query) (Report, error) {
-	report := Report{Days: make(map[string]int)}
-	if err := ctx.Err(); err != nil {
-		return report, err
-	}
-	type result struct {
-		path    string
-		commits []CommitRecord
-		err     error
-	}
+type repositoryResult struct {
+	path    string
+	commits []CommitRecord
+	err     error
+}
+
+// readRepositories streams completed repositories. Cancellation also releases
+// workers when an interactive consumer quits before draining the channel.
+func readRepositories(ctx context.Context, repos []string, q Query) <-chan repositoryResult {
 	jobs := make(chan string)
-	results := make(chan result)
+	results := make(chan repositoryResult)
 	var workers sync.WaitGroup
-	// Bound concurrent history reads even for very large workspaces.
 	for range min(8, len(repos)) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
 			for path := range jobs {
 				commits, err := readRepo(ctx, path, q)
-				results <- result{path, commits, err}
+				select {
+				case results <- repositoryResult{path, commits, err}:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}()
 	}
@@ -180,26 +182,44 @@ func processRepos(ctx context.Context, repos []string, q Query) (Report, error) 
 		workers.Wait()
 		close(results)
 	}()
-	byHash := make(map[plumbing.Hash]int)
-	for result := range results {
-		if result.err != nil {
-			report.Diagnostics = append(report.Diagnostics, Diagnostic{result.path, result.err})
+	return results
+}
+
+type reportBuilder struct {
+	report Report
+	byHash map[plumbing.Hash]int
+	query  Query
+}
+
+func newReportBuilder(q Query) *reportBuilder {
+	return &reportBuilder{
+		report: Report{Days: make(map[string]int)},
+		byHash: make(map[plumbing.Hash]int), query: q,
+	}
+}
+
+func (b *reportBuilder) add(result repositoryResult) {
+	if result.err != nil {
+		b.report.Diagnostics = append(b.report.Diagnostics, Diagnostic{result.path, result.err})
+		return
+	}
+	b.report.Processed++
+	for _, commit := range result.commits {
+		if i, exists := b.byHash[commit.Hash]; exists {
+			paths := b.report.Commits[i].Repositories
+			if !slices.Contains(paths, result.path) {
+				b.report.Commits[i].Repositories = append(paths, result.path)
+			}
 			continue
 		}
-		report.Processed++
-		for _, commit := range result.commits {
-			if i, exists := byHash[commit.Hash]; exists {
-				paths := report.Commits[i].Repositories
-				if !slices.Contains(paths, result.path) {
-					report.Commits[i].Repositories = append(paths, result.path)
-				}
-				continue
-			}
-			byHash[commit.Hash] = len(report.Commits)
-			report.Commits = append(report.Commits, commit)
-			report.Days[dateKey(commit.AuthorWhen, q.Boundary.Location)]++
-		}
+		b.byHash[commit.Hash] = len(b.report.Commits)
+		b.report.Commits = append(b.report.Commits, commit)
+		b.report.Days[dateKey(commit.AuthorWhen, b.query.Boundary.Location)]++
 	}
+}
+
+func (b *reportBuilder) finish() Report {
+	report := b.report
 	for i := range report.Commits {
 		sort.Strings(report.Commits[i].Repositories)
 	}
@@ -211,5 +231,13 @@ func processRepos(ctx context.Context, repos []string, q Query) (Report, error) 
 		return a.Hash.String() < b.Hash.String()
 	})
 	sort.Slice(report.Diagnostics, func(i, j int) bool { return report.Diagnostics[i].Path < report.Diagnostics[j].Path })
-	return report, ctx.Err()
+	return report
+}
+
+func processRepos(ctx context.Context, repos []string, q Query) (Report, error) {
+	builder := newReportBuilder(q)
+	for result := range readRepositories(ctx, repos, q) {
+		builder.add(result)
+	}
+	return builder.finish(), ctx.Err()
 }

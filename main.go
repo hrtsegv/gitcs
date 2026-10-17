@@ -32,6 +32,14 @@ func (e *emailFlags) Set(value string) error {
 }
 
 func run(ctx context.Context, args []string, out, errOut io.Writer, now time.Time) int {
+	return runWithInput(ctx, args, os.Stdin, out, errOut, now)
+}
+
+func runWithInput(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer, now time.Time) int {
+	explore := len(args) > 0 && args[0] == "explore"
+	if explore {
+		args = args[1:]
+	}
 	flags := flag.NewFlagSet("gitcs", flag.ContinueOnError)
 	flags.SetOutput(errOut)
 	var since, until, path, scope, timezone string
@@ -45,10 +53,16 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, now time.Tim
 	flags.StringVar(&timezone, "timezone", "Local", "reporting timezone, e.g. UTC or Asia/Beirut")
 	flags.IntVar(&width, "width", 0, "calendar width in columns (default: terminal width, or 80 when piped)")
 	flags.Usage = func() {
-		fmt.Fprintln(errOut, "Usage: gitcs [flags]")
+		if explore {
+			fmt.Fprintln(errOut, "Usage: gitcs explore [flags]")
+			fmt.Fprintln(errOut, "\nExplore local commits interactively. Arrows navigate, Enter opens, ? shows help, q quits.")
+		} else {
+			fmt.Fprintln(errOut, "Usage: gitcs [flags]\n       gitcs explore [flags]")
+		}
 		fmt.Fprintln(errOut, "\nVisualize unique local commits by author date.")
 		fmt.Fprintln(errOut, "\nExamples:")
 		fmt.Fprintln(errOut, "  gitcs")
+		fmt.Fprintln(errOut, "  gitcs explore -path ~/dev -email '*'")
 		fmt.Fprintln(errOut, "  gitcs -path ~/dev -email '*'")
 		fmt.Fprintln(errOut, "  gitcs -since 2026-01-01 -until 2026-01-31 -timezone UTC")
 		fmt.Fprintln(errOut, "\nFlags:")
@@ -73,6 +87,9 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, now time.Tim
 	if width != 0 && width < 20 {
 		return fail(fmt.Errorf("-width must be at least 20 columns"))
 	}
+	if explore && width != 0 && width < 32 {
+		return fail(fmt.Errorf("-width must be at least 32 columns for the explorer"))
+	}
 	if BranchScope(scope) != LocalBranches && BranchScope(scope) != HeadBranch {
 		return fail(fmt.Errorf("invalid branch scope %q; use local or head", scope))
 	}
@@ -92,6 +109,9 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, now time.Tim
 	if !info.IsDir() {
 		return fail(fmt.Errorf("path %q is not a directory", path))
 	}
+	if explore && (!interactiveTerminal(in) || !interactiveTerminal(out)) {
+		return fail(fmt.Errorf("gitcs explore requires an interactive terminal; use gitcs [flags] for a printable report"))
+	}
 	if len(emails) == 0 {
 		email := getGitEmail(path)
 		if email == "" {
@@ -105,6 +125,14 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, now time.Tim
 	}
 	if boundary.UntilClamped {
 		fmt.Fprintf(errOut, "gitcs: end date is in the future; using %s\n", now.Format(dateLayout))
+	}
+
+	query := Query{Boundary: boundary, Emails: authors, BranchScope: BranchScope(scope), Now: now}
+	if explore {
+		if err := runExplorer(ctx, in, out, path, query, width); err != nil {
+			return fail(err)
+		}
+		return 0
 	}
 
 	var loading *spinner.Spinner
@@ -121,7 +149,6 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, now time.Tim
 		}
 		return fail(err)
 	}
-	query := Query{Boundary: boundary, Emails: authors, BranchScope: BranchScope(scope), Now: now}
 	report, err := processRepos(ctx, scan.Repos, query)
 	if loading != nil {
 		loading.Stop()

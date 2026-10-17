@@ -53,6 +53,49 @@ gitcs -since "2026-01-01" -until "2026-01-31" -timezone "Asia/Beirut" -path "/ho
   `-width 80` to choose a width explicitly. Piped output defaults to 80 columns.
 - Run `gitcs -help` for all options. `NO_COLOR=1` disables colored output.
 
+### Interactive explorer
+
+Open a contribution calendar, commit list, and full commit details in your terminal:
+
+```bash
+gitcs explore -path ~/dev
+gitcs explore -path ~/dev -email '*' -since 2026-01-01
+```
+
+The explorer accepts the same author, date, timezone, branch, and width flags as
+the report. It starts on the latest date with matching commits. Repositories load
+in the background; progress and warnings stay visible while you browse.
+
+| Key | Action |
+| --- | --- |
+| Arrows or `h`/`j`/`k`/`l` | Move through the calendar; left/right move a week, up/down a day |
+| `Home` / `End` | First / last date, or first / last commit in the list |
+| `PgUp` / `PgDown` | Move four weeks, or page through a list or details |
+| `Enter` / `Esc` | Open commits, then details / go back |
+| `Tab` / `Shift+Tab` | Switch panes |
+| `d` | Toggle the selected day / all dates |
+| `/` | Search loaded commit messages and hashes across all dates |
+| `r` | Filter by repository |
+| `w` | Inspect warnings and skipped repositories |
+| `R` | Refresh the scan |
+| `?` | Show help |
+| `q` / `Ctrl+C` | Quit / cancel and quit |
+
+Search updates the calendar and list together. `Enter` accepts a search; `Esc`
+restores the previous search. On the calendar, `Esc` clears an accepted search.
+Repository filtering still counts a shared commit once, and details show every
+repository containing that commit.
+
+Wide terminals show the list and details side by side. Smaller terminals show
+the active pane; resizing preserves your selection. The minimum size is 32
+columns by 20 rows. Selection markers and intensity symbols also work with
+`NO_COLOR=1`. Quitting restores the terminal and cancels background work.
+
+The explorer requires an interactive input and output terminal. Use
+`gitcs [flags]` for printable or piped output. Filters apply to the history loaded by
+the command-line options; change those options to include other authors or dates.
+Details include the full message, hash, author, timestamps, and repository paths.
+
 ### How commits are counted
 
 - Both filtering and daily totals use the **author date**, converted to the
