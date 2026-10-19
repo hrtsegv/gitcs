@@ -145,6 +145,9 @@ so totals may change with these corrected counting rules.
 
 ## Contributions
 
+See [TESTING.md](TESTING.md) for regression coverage, read-only checks against
+native Git on real repositories, and release build verification.
+
 Contributions are welcome! If you would like to contribute to this project, please follow these steps:
 
 1- Fork the repository.

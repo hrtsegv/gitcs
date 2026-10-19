@@ -113,7 +113,10 @@ func runWithInput(ctx context.Context, args []string, in io.Reader, out, errOut 
 		return fail(fmt.Errorf("gitcs explore requires an interactive terminal; use gitcs [flags] for a printable report"))
 	}
 	if len(emails) == 0 {
-		email := getGitEmail(path)
+		email, err := getGitEmail(ctx, path)
+		if err != nil {
+			return fail(err)
+		}
 		if email == "" {
 			return fail(fmt.Errorf("no Git email configured; use -email name@example.com or -email '*' for all authors"))
 		}

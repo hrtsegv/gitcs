@@ -37,6 +37,15 @@ type repositoryMsg struct {
 	done       bool
 }
 
+type explorerPosition struct {
+	focus        explorerFocus
+	date         time.Time
+	autoDate     bool
+	hash         plumbing.Hash
+	listOffset   int
+	detailOffset int
+}
+
 type explorer struct {
 	parent     context.Context
 	ctx        context.Context
@@ -72,14 +81,14 @@ type explorer struct {
 	patch      patchViewer
 	loadPatch  func(context.Context, plumbing.Hash, []string) (CommitPatch, error)
 
-	search       textinput.Model
-	searching    bool
-	searchBefore string
-	searchFocus  explorerFocus
-	overlay      string
-	overlayBack  string
-	overlayView  viewport.Model
-	repoCursor   int
+	search               textinput.Model
+	searching            bool
+	searchBefore         string
+	searchBeforePosition explorerPosition
+	overlay              string
+	overlayBack          string
+	overlayView          viewport.Model
+	repoCursor           int
 }
 
 func interactiveTerminal(value any) bool {
@@ -201,8 +210,12 @@ func (m *explorer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.searching = false
 				m.search.Blur()
-				m.focus = m.searchFocus
-				m.refreshSelection(false)
+				m.focus = m.searchBeforePosition.focus
+				if key == "esc" {
+					m.restoreSearchPosition()
+				} else {
+					m.refreshSelection(false)
+				}
 				return m, nil
 			default:
 				var cmd tea.Cmd
@@ -235,7 +248,14 @@ func (m *explorer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.refresh()
 		case "/":
 			m.searching = true
-			m.searchBefore, m.searchFocus = m.search.Value(), m.focus
+			m.searchBefore = m.search.Value()
+			m.searchBeforePosition = explorerPosition{
+				focus: m.focus, date: m.date, autoDate: m.autoDate,
+				listOffset: m.listOffset, detailOffset: m.details.YOffset(),
+			}
+			if commit := m.selectedCommit(); commit != nil {
+				m.searchBeforePosition.hash = commit.Hash
+			}
 			return m, m.search.Focus()
 		case "d":
 			m.allDates = !m.allDates
@@ -291,6 +311,25 @@ func (m *explorer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *explorer) restoreSearchPosition() {
+	position := m.searchBeforePosition
+	// A cancelled search returns to the commit being read, even if incoming
+	// repository results changed its row index while the search was open.
+	m.date, m.autoDate = position.date, false
+	m.refreshSelection(false)
+	for i, index := range m.visible {
+		if m.builder.report.Commits[index].Hash == position.hash {
+			m.selected = i
+			break
+		}
+	}
+	m.listOffset = position.listOffset
+	m.ensureVisible()
+	m.updateDetails(false)
+	m.details.SetYOffset(position.detailOffset)
+	m.autoDate = position.autoDate
 }
 
 func (m *explorer) refresh() tea.Cmd {

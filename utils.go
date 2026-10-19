@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/mail"
 	"os/exec"
@@ -58,13 +59,16 @@ func setTimeFlags(since, until string, now time.Time) (Boundary, error) {
 	return b, nil
 }
 
-func getGitEmail(path string) string {
+func getGitEmail(ctx context.Context, path string) (string, error) {
 	// Git resolves repository-local, includeIf, global, and system configuration.
-	output, err := exec.Command("git", "-C", path, "config", "--get", "user.email").Output()
-	if err != nil {
-		return ""
+	output, err := exec.CommandContext(ctx, "git", "-C", path, "config", "--get", "user.email").Output()
+	if ctx.Err() != nil {
+		return "", ctx.Err()
 	}
-	return strings.TrimSpace(string(output))
+	if err != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func parseEmails(values []string) ([]string, error) {
