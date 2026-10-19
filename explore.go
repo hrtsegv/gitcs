@@ -13,6 +13,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/go-git/go-git/v5/plumbing"
 	"golang.org/x/term"
 )
 
@@ -68,12 +69,15 @@ type explorer struct {
 	selected   int
 	listOffset int
 	details    viewport.Model
+	patch      patchViewer
+	loadPatch  func(context.Context, plumbing.Hash, []string) (CommitPatch, error)
 
 	search       textinput.Model
 	searching    bool
 	searchBefore string
 	searchFocus  explorerFocus
 	overlay      string
+	overlayBack  string
 	overlayView  viewport.Model
 	repoCursor   int
 }
@@ -109,6 +113,7 @@ func newExplorer(parent context.Context, root string, q Query, width int) *explo
 		date: q.Boundary.Until.AddDate(0, 0, -1), autoDate: true,
 		discovery: true, loading: true, days: make(map[string]int),
 		search: search, details: viewport.New(), overlayView: viewport.New(),
+		patch: patchViewer{view: viewport.New()}, loadPatch: loadCommitPatch,
 	}
 	m.details.SoftWrap = true
 	m.overlayView.SoftWrap = true
@@ -143,6 +148,8 @@ func (m *explorer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.resize()
+	case patchMsg:
+		m.receivePatch(msg)
 	case discoveredMsg:
 		if msg.generation != m.generation {
 			return m, nil
@@ -216,6 +223,8 @@ func (m *explorer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openOverlay("help")
 		case "w":
 			m.openOverlay("warnings")
+		case "p":
+			return m, m.openPatch(false)
 		case "r":
 			m.repoCursor = 0
 			if i := slices.Index(m.repos, m.repo); i >= 0 {
@@ -285,6 +294,7 @@ func (m *explorer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *explorer) refresh() tea.Cmd {
+	m.discardPatch()
 	m.cancel()
 	m.ctx, m.cancel = context.WithCancel(m.parent)
 	m.generation++
@@ -427,6 +437,7 @@ func (m *explorer) refreshSelection(keep bool) {
 }
 
 func (m *explorer) updateDetails(reset bool) {
+	m.syncPatchSelection()
 	commit := m.selectedCommit()
 	if commit == nil {
 		m.details.SetContent("Select a date with commits, or press d for all dates.")
@@ -449,6 +460,7 @@ func (m *explorer) updateDetails(reset bool) {
 }
 
 func (m *explorer) openOverlay(name string) {
+	m.overlayBack = ""
 	m.overlay = name
 	m.setOverlayContent()
 	m.overlayView.GotoTop()
@@ -456,8 +468,11 @@ func (m *explorer) openOverlay(name string) {
 
 func (m *explorer) updateOverlay(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
+	if m.overlay == "patch" {
+		return m.updatePatch(msg)
+	}
 	if key == "esc" || key == "?" && m.overlay == "help" || key == "w" && m.overlay == "warnings" {
-		m.overlay = ""
+		m.overlay, m.overlayBack = m.overlayBack, ""
 		return nil
 	}
 	if m.overlay == "repositories" {
@@ -504,6 +519,11 @@ Home/End: first/last date. PgUp/PgDown: four weeks.
 Enter: calendar -> commits -> details. Esc: back. Tab: switch pane.
 Commits: up/down or j/k select; PgUp/PgDown and Home/End jump.
 Details: up/down or j/k scroll; PgUp/PgDown, Home/End.
+
+p  Open the selected commit's patch (loaded on demand)
+   Patch: up/down scroll, left/right pan; PgUp/PgDown, Home/End.
+   Esc or p returns; R reloads; ? shows help.
+   Merge patches compare against the first parent. Output is capped at 1 MiB.
 
 d  Toggle selected day / all dates
 /  Search loaded messages and hashes across all dates

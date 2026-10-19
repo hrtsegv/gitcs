@@ -72,6 +72,7 @@ in the background; progress and warnings stay visible while you browse.
 | `Home` / `End` | First / last date, or first / last commit in the list |
 | `PgUp` / `PgDown` | Move four weeks, or page through a list or details |
 | `Enter` / `Esc` | Open commits, then details / go back |
+| `p` | Open the selected commit's patch; `Esc` or `p` returns |
 | `Tab` / `Shift+Tab` | Switch panes |
 | `d` | Toggle the selected day / all dates |
 | `/` | Search loaded commit messages and hashes across all dates |
@@ -95,6 +96,24 @@ The explorer requires an interactive input and output terminal. Use
 `gitcs [flags]` for printable or piped output. Filters apply to the history loaded by
 the command-line options; change those options to include other authors or dates.
 Details include the full message, hash, author, timestamps, and repository paths.
+
+Press `p` to inspect a commit's changes in a full-screen patch viewer. Patches
+load only when requested. Use up/down to scroll, left/right to pan long lines,
+and `PgUp`/`PgDown` or `Home`/`End` to move through the diff. `?` opens help;
+closing help returns to the patch. Your date, commit selection, and detail
+position are preserved when you return.
+
+The patch viewer requires Git on `PATH` and uses local objects only. It disables
+external diff commands, text conversion commands, and pagers. Merge commits show
+changes against their first parent. If a shallow repository is missing that
+parent, gitcs tries another repository containing the commit, then explains the
+missing history if none can provide it. Empty commits show a no-changes message.
+
+Patch output is limited to 1 MiB and visibly labeled when truncated. `Esc`
+cancels a pending load; `R` in the viewer reloads the patch. A successful patch
+is kept in memory while that commit remains selected, and a scan refresh clears
+it. Added and removed lines use color when enabled, with their `+`/`-` markers
+also visible with `NO_COLOR=1`.
 
 ### How commits are counted
 

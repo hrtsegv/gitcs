@@ -53,6 +53,10 @@ func (m *explorer) resize() {
 	m.details.SetHeight(m.bodyHeight() - 1)
 	m.overlayView.SetWidth(width)
 	m.overlayView.SetHeight(max(1, m.height-2))
+	m.patch.view.SetWidth(width)
+	m.patch.view.SetHeight(max(1, m.height-5))
+	m.patch.view.SetXOffset(m.patch.view.XOffset())
+	m.patch.view.SetYOffset(m.patch.view.YOffset())
 	m.search.SetWidth(max(1, width-9))
 	m.ensureVisible()
 }
@@ -87,6 +91,8 @@ func (m *explorer) View() tea.View {
 	case m.overlay != "":
 		if m.overlay == "repositories" {
 			content = m.repositoryView(width, height)
+		} else if m.overlay == "patch" {
+			content = m.patchView(width)
 		} else {
 			content = m.overlayView.View() + "\n\nArrows scroll | Esc back | q quit"
 		}
@@ -103,15 +109,15 @@ func (m *explorer) View() tea.View {
 			m.root, safeLine(authors), repo,
 			m.query.Boundary.Since.Format(dateLayout), m.query.Boundary.Until.AddDate(0, 0, -1).Format(dateLayout),
 			m.query.Boundary.Location, m.query.BranchScope)
-		footer := "Arrows | Enter open | Tab pane | / search | r repos | ? help | q quit"
+		footer := "Arrows | Enter open | p patch | / search | r repos | ? help | q quit"
 		if m.focus == focusDetails {
-			footer = "Arrows scroll | PgUp/PgDown page | Esc list | / search | ? help | q quit"
+			footer = "Arrows scroll | p patch | Esc list | / search | ? help | q quit"
 		}
 		if width < 70 {
-			footer = "Enter open | / search | r repos | ? help | q quit"
+			footer = "Enter open | p patch | / search | ? help | q quit"
 		}
 		if width < 50 {
-			footer = "Enter open | / search | ? | q"
+			footer = "Enter open | p patch | / | ? | q"
 		}
 		if m.searching {
 			footer = m.search.View()

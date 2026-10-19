@@ -53,6 +53,7 @@ func TestExplorerTerminalLifecycle(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			repo := createTestRepo(t, root, "tester@test.com", 0, testClock)
+			patchTestFile(t, repo, root, "changes.txt", "PTY_PATCH_CONTENT\n")
 			addTestCommit(t, repo, "PTY smoke commit", "tester@test.com", testClock, testClock)
 			master, slave, err := pty.Open()
 			if err != nil {
@@ -111,6 +112,28 @@ func TestExplorerTerminalLifecycle(t *testing.T) {
 			waitFor("PTY smoke commit")
 			if !strings.Contains(output.String(), "\x1b[?1049h") {
 				t.Fatal("UI did not enter the alternate screen")
+			}
+			if _, err := exec.LookPath("git"); err == nil {
+				output.Reset()
+				if _, err := io.WriteString(master, "p"); err != nil {
+					t.Fatal(err)
+				}
+				waitFor("+PTY_PATCH_CONTENT")
+				output.Reset()
+				if _, err := io.WriteString(master, "?"); err != nil {
+					t.Fatal(err)
+				}
+				waitFor("Explore commits")
+				output.Reset()
+				if _, err := io.WriteString(master, "\x1b"); err != nil {
+					t.Fatal(err)
+				}
+				waitFor("+PTY_PATCH_CONTENT")
+				output.Reset()
+				if _, err := io.WriteString(master, "\x1b"); err != nil {
+					t.Fatal(err)
+				}
+				waitFor("gitcs explore")
 			}
 			// Search must consume q as text; Escape restores the previous filter.
 			output.Reset()
