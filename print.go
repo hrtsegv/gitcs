@@ -90,17 +90,33 @@ func printCell(val, maxValue int) string {
 		return color.New(color.FgLightWhite, color.BgBlack).Sprintf(" %*s ", digits, "-")
 	}
 	var style color.Style
-	switch {
-	case val <= maxValue/4:
+	switch contributionLevel(val, maxValue) {
+	case 1:
 		style = color.New(color.FgBlack, color.BgLightCyan)
-	case val <= maxValue/2:
+	case 2:
 		style = color.New(color.FgBlack, color.BgHiCyan)
-	case val <= maxValue/4*3+maxValue%4*3/4:
+	case 3:
 		style = color.New(color.FgBlack, color.BgHiBlue)
 	default:
 		style = color.New(color.FgLightWhite, color.BgBlue)
 	}
 	return style.Sprintf(" %*d ", digits, val)
+}
+
+// Both calendars use the same scale for a given set of daily counts.
+func contributionLevel(value, maximum int) int {
+	switch {
+	case value <= 0:
+		return 0
+	case value <= maximum/4:
+		return 1
+	case value <= maximum/2:
+		return 2
+	case value <= maximum/4*3+maximum%4*3/4:
+		return 3
+	default:
+		return 4
+	}
 }
 
 func printLegend(out io.Writer, maxValue, width int) {

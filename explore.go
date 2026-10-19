@@ -442,17 +442,7 @@ func (m *explorer) updateDetails(reset bool) {
 	if commit == nil {
 		m.details.SetContent("Select a date with commits, or press d for all dates.")
 	} else {
-		var paths []string
-		for _, path := range commit.Repositories {
-			paths = append(paths, fmt.Sprintf("  %q", path))
-		}
-		sort.Strings(paths)
-		m.details.SetContent(fmt.Sprintf("%s\nAuthor: %s <%s>\nAuthored: %s\n\n%s\n\nCommitted: %s\nRepositories:\n%s",
-			commit.Hash, safeLine(commit.AuthorName), safeLine(commit.AuthorEmail),
-			commit.AuthorWhen.In(m.query.Boundary.Location).Format(time.RFC3339),
-			safeText(commit.Message),
-			commit.CommitterWhen.In(m.query.Boundary.Location).Format(time.RFC3339),
-			strings.Join(paths, "\n")))
+		m.details.SetContent(m.commitDetails(*commit))
 	}
 	if reset {
 		m.details.GotoTop()
@@ -538,7 +528,11 @@ q  Quit     Ctrl+C  Cancel and quit
 Counts use author dates in the selected timezone. Only the authors,
 dates and branch scope supplied on the command line are loaded.
 Results appear as repositories finish. Filters apply to loaded results.
-Resizing preserves your selection. NO_COLOR disables colored text.`)
+Calendar cells show exact daily counts; - means zero. Brackets mark the day.
+Total is unique commits loaded by the command-line filters. Matching applies
+the repository and search filters; the list shows one day or all dates.
+Counts are provisional while loading. Resizing preserves your selection.
+NO_COLOR disables colored text; numbers and selection markers remain.`)
 	case "warnings":
 		lines := []string{"Warnings / skipped repositories", ""}
 		if m.scanErr != nil {

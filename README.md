@@ -87,9 +87,16 @@ restores the previous search. On the calendar, `Esc` clears an accepted search.
 Repository filtering still counts a shared commit once, and details show every
 repository containing that commit.
 
+The calendar shows exact daily counts using the report's heatmap scale. `-`
+means zero; brackets mark the selected day. **Total** is the number of unique
+commits loaded by the command-line filters. **Matching** appears when a repository
+or search filter is active and counts those matches across all dates. The selected
+day and list each show their own counts. Counts remain provisional while loading;
+duplicate commits across repositories are counted once in both commands.
+
 Wide terminals show the list and details side by side. Smaller terminals show
 the active pane; resizing preserves your selection. The minimum size is 32
-columns by 20 rows. Selection markers and intensity symbols also work with
+columns by 20 rows. Exact numbers and selection markers also work with
 `NO_COLOR=1`. Quitting restores the terminal and cancels background work.
 
 The explorer requires an interactive input and output terminal. Use

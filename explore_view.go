@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -51,8 +52,10 @@ func (m *explorer) resize() {
 	}
 	m.details.SetWidth(max(1, detailWidth))
 	m.details.SetHeight(m.bodyHeight() - 1)
+	m.details.SetYOffset(m.details.YOffset())
 	m.overlayView.SetWidth(width)
 	m.overlayView.SetHeight(max(1, m.height-2))
+	m.overlayView.SetYOffset(m.overlayView.YOffset())
 	m.patch.view.SetWidth(width)
 	m.patch.view.SetHeight(max(1, m.height-5))
 	m.patch.view.SetXOffset(m.patch.view.XOffset())
@@ -77,7 +80,7 @@ func (m *explorer) label(text string, focused bool) string {
 		text = "[" + text + "]"
 	}
 	if m.color && focused {
-		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2")).Render(text)
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render(text)
 	}
 	return text
 }
@@ -97,34 +100,30 @@ func (m *explorer) View() tea.View {
 			content = m.overlayView.View() + "\n\nArrows scroll | Esc back | q quit"
 		}
 	default:
-		authors := strings.Join(m.query.Emails, ", ")
-		if authors == "*" {
-			authors = "all authors"
+		footer := "Arrows move | Enter open | p patch | d all dates | / search | r repos | ? help | q quit"
+		if width < 100 {
+			footer = "Arrows | Enter open | p patch | d all dates | / search | ? | q"
 		}
-		repo := "all repositories"
-		if m.repo != "" {
-			repo = fmt.Sprintf("%q", m.repo)
-		}
-		header := fmt.Sprintf("gitcs explore | %q\nAuthors: %s | %s\n%s..%s | %s | branches: %s\n",
-			m.root, safeLine(authors), repo,
-			m.query.Boundary.Since.Format(dateLayout), m.query.Boundary.Until.AddDate(0, 0, -1).Format(dateLayout),
-			m.query.Boundary.Location, m.query.BranchScope)
-		footer := "Arrows | Enter open | p patch | / search | r repos | ? help | q quit"
 		if m.focus == focusDetails {
 			footer = "Arrows scroll | p patch | Esc list | / search | ? help | q quit"
 		}
 		if width < 70 {
-			footer = "Enter open | p patch | / search | ? help | q quit"
+			footer = "Enter open | p patch | d dates | / search | ? | q"
 		}
 		if width < 50 {
-			footer = "Enter open | p patch | / | ? | q"
+			footer = "Enter | p patch | d | / | ? | q"
+			if m.focus == focusDetails {
+				footer = "Arrows scroll | Esc | p | ? | q"
+			} else if m.focus == focusCommits {
+				footer = "Arrows | Enter | Esc | p | ? | q"
+			}
 		}
 		if m.searching {
 			footer = m.search.View()
 		} else if m.search.Value() != "" {
-			footer = fmt.Sprintf("Search: %s | / edit | Esc on calendar clears | ? help | q quit", safeLine(m.search.Value()))
+			footer = spreadLine("Search: "+safeLine(m.search.Value()), "/ edit | Esc back/clear | ? | q", width)
 		}
-		content = header + m.calendarView(width) + "\n" + m.bodyView(width) + "\n" + footer + "\n" + m.statusLine()
+		content = m.headerView(width) + "\n" + m.calendarView(width) + "\n" + m.bodyView(width) + "\n" + footer + "\n" + m.statusLine()
 	}
 	if !m.color {
 		content = ansi.Strip(content)
@@ -150,6 +149,101 @@ func fitLines(content string, width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
+// Keep the right-hand summary visible even when a path or label is long.
+func spreadLine(left, right string, width int) string {
+	left = ansi.Truncate(left, max(0, width-ansi.StringWidth(right)-1), "…")
+	return left + strings.Repeat(" ", max(1, width-ansi.StringWidth(left)-ansi.StringWidth(right))) + right
+}
+
+func (m *explorer) muted(text string) string {
+	if m.color {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render(text)
+	}
+	return text
+}
+
+func (m *explorer) sectionLine(title, meta string, focused bool, width int) string {
+	title = m.label(title, focused)
+	gap := width - ansi.StringWidth(title) - ansi.StringWidth(meta) - 2
+	if gap < 1 {
+		return spreadLine(title, meta, width)
+	}
+	return title + " " + m.muted(strings.Repeat("─", gap)) + " " + meta
+}
+
+func (m *explorer) matchingCount() int {
+	total := 0
+	for _, count := range m.days {
+		total += count
+	}
+	return total
+}
+
+func (m *explorer) headerView(width int) string {
+	title := "gitcs explore"
+	total := fmt.Sprintf("Total: %d", len(m.builder.report.Commits))
+	if m.color {
+		title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render(title)
+		total = lipgloss.NewStyle().Bold(true).Render(total)
+	}
+	if width >= 70 {
+		title += " | " + m.muted(fmt.Sprintf("%q", m.root))
+	}
+	authors := safeLine(strings.Join(m.query.Emails, ", "))
+	if authors == "*" {
+		authors = "all authors"
+	}
+	repo := "all repositories"
+	if m.repo != "" {
+		repo = fmt.Sprintf("%q", m.repo)
+	}
+	filters := fmt.Sprintf("Authors: %s | %s", authors, repo)
+	if m.repo != "" || m.search.Value() != "" {
+		filters = fmt.Sprintf("Matching: %d | %s", m.matchingCount(), filters)
+	}
+	scope := "all local branches + HEAD"
+	if m.query.BranchScope == HeadBranch {
+		scope = "HEAD history"
+	}
+	dates := fmt.Sprintf("%s..%s | %s | %s | author dates",
+		m.query.Boundary.Since.Format(dateLayout), m.query.Boundary.Until.AddDate(0, 0, -1).Format(dateLayout),
+		m.query.Boundary.Location, scope)
+	return strings.Join([]string{spreadLine(title, total, width), filters, dates}, "\n")
+}
+
+func commitLabel(count int) string {
+	if count == 1 {
+		return "1 commit"
+	}
+	return fmt.Sprintf("%d commits", count)
+}
+
+func (m *explorer) commitDetails(commit CommitRecord) string {
+	message := strings.SplitN(safeText(commit.Message), "\n", 2)
+	subject := message[0]
+	if subject == "" {
+		subject = "(no subject)"
+	}
+	if m.color {
+		subject = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render(subject)
+	}
+	parts := []string{subject, m.muted(commit.Hash.String()), "",
+		fmt.Sprintf("Author: %s <%s>", safeLine(commit.AuthorName), safeLine(commit.AuthorEmail)),
+		"Authored: " + commit.AuthorWhen.In(m.query.Boundary.Location).Format(time.RFC3339),
+		"Committed: " + commit.CommitterWhen.In(m.query.Boundary.Location).Format(time.RFC3339),
+	}
+	if len(message) > 1 && strings.TrimSpace(message[1]) != "" {
+		parts = append(parts, "", strings.Trim(message[1], "\n"))
+	}
+	paths := make([]string, 0, len(commit.Repositories))
+	for _, path := range commit.Repositories {
+		paths = append(paths, fmt.Sprintf("  %q", path))
+	}
+	sort.Strings(paths)
+	parts = append(parts, "", "Repositories:", strings.Join(paths, "\n"))
+	return strings.Join(parts, "\n")
+}
+
 func civilDays(from, to time.Time) int {
 	return int((to.Unix() - from.Unix()) / 86400)
 }
@@ -157,82 +251,147 @@ func civilDays(from, to time.Time) int {
 func (m *explorer) calendarView(width int) string {
 	b := m.query.Boundary
 	start := b.Since.AddDate(0, 0, -int(b.Since.Weekday()))
+	maximum := getMaxValue(m.days)
+	cell := cellWidth(maximum)
 	totalWeeks := (civilDays(start, b.Until) + 6) / 7
-	weeks := min(totalWeeks, max(1, (width-4)/3))
+	weeks := min(totalWeeks, max(1, (width-4)/cell))
 	selectedWeek := civilDays(start, m.date) / 7
 	firstWeek := max(0, min(selectedWeek-weeks/2, totalWeeks-weeks))
 	start = start.AddDate(0, 0, firstWeek*7)
-	lines := []string{m.label("Calendar", m.focus == focusCalendar) + "  . 0  : 1  o 2-3  O 4-7  # 8+"}
-	months := "    "
+	meta := fmt.Sprintf("daily counts | peak %d", maximum)
+	if width < 50 {
+		meta = "daily counts"
+	}
+	if m.loading {
+		meta = "counts so far"
+	}
+	lines := []string{m.sectionLine("Calendar", meta, m.focus == focusCalendar, width)}
+	monthLabels := make([]string, 4+weeks*cell)
+	type monthLabel struct {
+		at  int
+		day time.Time
+	}
+	var labels []monthLabel
 	for week := range weeks {
 		day := start.AddDate(0, 0, week*7)
-		month := "   "
-		if week == 0 && day.Month() == day.AddDate(0, 0, 7).Month() || week > 0 && day.Month() != day.AddDate(0, 0, -7).Month() {
-			month = day.Format("Jan")
+		if day.Before(b.Since) {
+			day = b.Since
 		}
-		months += month
+		previous := start.AddDate(0, 0, (week-1)*7)
+		if previous.Before(b.Since) {
+			previous = b.Since
+		}
+		if week == 0 || day.Month() != previous.Month() {
+			labels = append(labels, monthLabel{4 + week*cell, day})
+		}
 	}
-	lines = append(lines, months)
+	for i, label := range labels {
+		end := len(monthLabels)
+		if i+1 < len(labels) {
+			end = labels[i+1].at
+		}
+		// Use one column of the weekday gutter when the first partial month
+		// occupies a single narrow cell, leaving a gap before the next label.
+		if i == 0 && i+1 < len(labels) && end-label.at <= 3 {
+			label.at--
+		}
+		text := label.day.Format("Jan")
+		if (i == 0 || label.day.Month() == time.January) && end-label.at > len("Jan 2006") {
+			text = label.day.Format("Jan 2006")
+		}
+		for j, r := range text {
+			if label.at+j >= end {
+				break
+			}
+			monthLabels[label.at+j] = string(r)
+		}
+	}
+	for i := range monthLabels {
+		if monthLabels[i] == "" {
+			monthLabels[i] = " "
+		}
+	}
+	lines = append(lines, m.muted(strings.Join(monthLabels, "")))
 	for weekday, name := range []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"} {
 		line := name + " "
 		for week := range weeks {
 			day := start.AddDate(0, 0, week*7+weekday)
 			if day.Before(b.Since) || !day.Before(b.Until) {
-				line += "   "
+				line += strings.Repeat(" ", cell)
 				continue
 			}
 			count := m.days[day.Format(dateLayout)]
-			symbol := "."
-			switch {
-			case count >= 8:
-				symbol = "#"
-			case count >= 4:
-				symbol = "O"
-			case count >= 2:
-				symbol = "o"
-			case count == 1:
-				symbol = ":"
-			}
-			cell := " " + symbol + " "
-			if day.Equal(m.date) {
-				cell = "[" + symbol + "]"
-			}
-			if m.color && count > 0 {
-				cell = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render(cell)
-			}
-			line += cell
+			line += m.calendarCell(count, maximum, day.Equal(m.date))
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, fmt.Sprintf("%s  |  %d commit(s)  |  weeks %d-%d/%d",
-		m.date.Format("Mon 2006-01-02"), m.days[m.date.Format(dateLayout)], firstWeek+1, firstWeek+weeks, totalWeeks))
+	selected := fmt.Sprintf("%s | %s", m.date.Format("Mon 2006-01-02"), commitLabel(m.days[m.date.Format(dateLayout)]))
+	if width >= 70 {
+		selected = spreadLine(selected, fmt.Sprintf("weeks %d-%d/%d", firstWeek+1, firstWeek+weeks, totalWeeks), width)
+	}
+	lines = append(lines, selected)
 	return strings.Join(lines, "\n")
+}
+
+func (m *explorer) calendarCell(count, maximum int, selected bool) string {
+	value := "-"
+	if count > 0 {
+		value = fmt.Sprint(count)
+	}
+	digits := cellWidth(maximum) - 2
+	cell := fmt.Sprintf(" %*s ", digits, value)
+	if selected {
+		cell = fmt.Sprintf("[%*s]", digits, value)
+	}
+	if !m.color {
+		return cell
+	}
+	style := lipgloss.NewStyle()
+	if selected {
+		style = style.Foreground(lipgloss.Color("0")).Background(lipgloss.Color("11")).Bold(true)
+	} else {
+		switch contributionLevel(count, maximum) {
+		case 0:
+			return m.muted(cell)
+		case 1:
+			style = style.Foreground(lipgloss.Color("0")).Background(lipgloss.Color("14"))
+		case 2:
+			style = style.Foreground(lipgloss.Color("0")).Background(lipgloss.Color("6"))
+		case 3:
+			style = style.Foreground(lipgloss.Color("15")).Background(lipgloss.Color("12"))
+		default:
+			style = style.Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4"))
+		}
+	}
+	return style.Render(cell)
 }
 
 func (m *explorer) bodyView(width int) string {
 	if width >= 100 {
 		listWidth := width / 2
 		left := m.commitListView(listWidth)
-		right := m.label("Details", m.focus == focusDetails) + "\n" + m.details.View()
+		right := m.sectionLine("Details", "", m.focus == focusDetails, width-listWidth-3) + "\n" + m.details.View()
 		divider := strings.TrimSuffix(strings.Repeat(" │ \n", m.bodyHeight()), "\n")
 		return lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(listWidth).Render(left), divider, right)
 	}
 	if m.focus == focusDetails {
-		return m.label("Details", true) + "\n" + m.details.View()
+		return m.sectionLine("Details", "", true, width) + "\n" + m.details.View()
 	}
 	return m.commitListView(width)
 }
 
 func (m *explorer) commitListView(width int) string {
-	scope := m.date.Format(dateLayout)
+	scope := fmt.Sprintf("%d on %s", len(m.visible), m.date.Format(dateLayout))
 	if m.allDates || m.search.Value() != "" {
-		scope = "all dates"
+		scope = fmt.Sprintf("%d across all dates", len(m.visible))
 	}
-	lines := []string{fmt.Sprintf("%s | %s | %d commit(s)", m.label("Commits", m.focus == focusCommits), scope, len(m.visible))}
+	lines := []string{m.sectionLine("Commits", scope, m.focus == focusCommits, width)}
 	if len(m.visible) == 0 {
 		message := "No commits on this date. d shows all dates; / searches."
 		if m.loading {
 			message = "Waiting for matching commits…"
+		} else if m.search.Value() != "" {
+			message = "No matches. / edits the search; Esc on calendar clears."
 		} else if m.scanErr != nil {
 			message = "Scan failed. w shows the error; R retries."
 		} else if m.builder.report.Processed == 0 && (len(m.repos) > 0 || len(m.builder.report.Diagnostics) > 0) {
@@ -254,8 +413,16 @@ func (m *explorer) commitListView(width int) string {
 		if subject == "" {
 			subject = "(no subject)"
 		}
-		line := fmt.Sprintf("%s%s %s %s", prefix, commit.Hash.String()[:7], commit.AuthorWhen.In(m.query.Boundary.Location).Format("01-02"), subject)
-		lines = append(lines, ansi.Truncate(line, width, "…"))
+		stamp := commit.AuthorWhen.In(m.query.Boundary.Location).Format("01-02")
+		if width >= 90 {
+			stamp = commit.AuthorWhen.In(m.query.Boundary.Location).Format("01-02 15:04")
+		}
+		line := fmt.Sprintf("%s%s %s %s", prefix, commit.Hash.String()[:7], stamp, subject)
+		line = ansi.Truncate(line, width, "…")
+		if i == m.selected && m.color {
+			line = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4")).Bold(true).Width(width).Render(line)
+		}
+		lines = append(lines, line)
 	}
 	return fitLines(strings.Join(lines, "\n"), width, m.bodyHeight())
 }
@@ -292,13 +459,15 @@ func (m *explorer) statusLine() string {
 	} else if warnings > 0 {
 		status = "Partial results"
 	}
-	total := 0
-	for _, count := range m.days {
-		total += count
-	}
 	if m.viewWidth() < 70 {
-		return fmt.Sprintf("%s %d/%d | %d commits | w:%d", status, m.completed, len(m.repos), total, warnings)
+		if status == "Partial results" {
+			status = "Partial"
+		}
+		return fmt.Sprintf("%s | %d/%d repos | w:%d", status, m.completed, len(m.repos), warnings)
 	}
-	return fmt.Sprintf("%s | %d warnings (w) | repos %d/%d read, %d finished | %d commits | R refresh",
-		status, warnings, m.builder.report.Processed, len(m.repos), m.completed, total)
+	progress := fmt.Sprintf("%d/%d repositories read", m.builder.report.Processed, len(m.repos))
+	if m.loading {
+		progress = fmt.Sprintf("%d/%d repositories finished | counts so far", m.completed, len(m.repos))
+	}
+	return fmt.Sprintf("%s | %s | %d warnings (w) | R refresh", status, progress, warnings)
 }
