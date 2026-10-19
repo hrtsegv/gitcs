@@ -109,6 +109,11 @@ func (m *explorer) View() tea.View {
 		}
 		if width < 70 {
 			footer = "Enter open | p patch | d dates | / search | ? | q"
+			if m.focus == focusDetails {
+				footer = "Arrows scroll | Esc list | p patch | ? | q"
+			} else if m.focus == focusCommits {
+				footer = "Arrows | Enter details | Esc calendar | p | ? | q"
+			}
 		}
 		if width < 50 {
 			footer = "Enter | p patch | d | / | ? | q"

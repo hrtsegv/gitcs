@@ -215,7 +215,7 @@ func TestExplorerMainViewResponsiveAndSafe(t *testing.T) {
 	m.root = "/workspace/" + strings.Repeat("界🙂", 60)
 	m.selectedCommit().Message = "界🙂 subject\x1b[31m red\x1b[0m\n\x1b]52;c;secret\a\nbody"
 	m.updateDetails(true)
-	for _, size := range [][2]int{{32, 20}, {80, 24}, {187, 43}} {
+	for _, size := range [][2]int{{32, 20}, {50, 24}, {60, 24}, {80, 24}, {187, 43}} {
 		for _, color := range []bool{false, true} {
 			m.color = color
 			m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
@@ -241,7 +241,7 @@ func TestExplorerMainViewResponsiveAndSafe(t *testing.T) {
 				if !strings.Contains(lines[0], "Total: 3") || !strings.Contains(lines[size[1]-2], "q") {
 					t.Fatalf("total or quit control clipped at %v: %s", size, plain)
 				}
-				if size[0] == 32 && focus != focusCalendar && !strings.Contains(lines[size[1]-2], "Esc") {
+				if size[0] < 70 && focus != focusCalendar && !strings.Contains(lines[size[1]-2], "Esc") {
 					t.Fatalf("back control missing from compact pane footer: %q", lines[size[1]-2])
 				}
 				if !strings.Contains(lines[size[1]-1], "Ready") {
